@@ -4,9 +4,7 @@
 
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -15,15 +13,22 @@ body {
   min-height: 100vh;
 }
 
-/* Smooth transitions */
 @layer utilities {
-  .transition-score {
-    transition: transform 0.3s ease, color 0.3s ease;
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
+    20%, 40%, 60%, 80% { transform: translateX(4px); }
   }
   
-  .pulse-score {
-    animation: pulse-score 0.5s ease-in-out;
+  .animate-shake {
+    animation: shake 0.4s ease-in-out;
   }
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+  20%, 40%, 60%, 80% { transform: translateX(5px); }
 }
 
 @keyframes pulse-score {
@@ -48,5 +53,6 @@ body {
 }
 
 .slide-down {
+  animation: slide-down 0.3s ease-out;
   animation: slide-down 0.3s ease-out;
 }

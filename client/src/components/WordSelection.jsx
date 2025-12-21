@@ -63,23 +63,40 @@ function WordSelection({ socket, isDrawer, onWordSelected }) {
     setTimeout(() => setWords([]), 500);
   };
 
+  const handleKeyPress = (e, word) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      handleSelectWord(word);
+    }
+  };
+
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-      <div className="bg-gray-800 rounded-lg p-8 border border-gray-700 max-w-md w-full mx-4">
-        <h2 className="text-2xl font-bold text-white mb-6 text-center">
-          Choose a word to draw:
+    <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-3 sm:p-4">
+      <div className="bg-neutral-900 rounded-lg p-4 sm:p-6 border-2 border-white max-w-lg w-full">
+        <h2 className="text-xl sm:text-3xl font-black text-white mb-2 text-center">
+          Choose Your Word
         </h2>
-        <div className="space-y-4">
+        <p className="text-neutral-400 text-xs sm:text-sm text-center mb-4 sm:mb-6 uppercase tracking-wide">
+          Select one to draw
+        </p>
+        <div className="space-y-2 sm:space-y-3">
           {words.map((word, idx) => (
             <button
               key={idx}
               onClick={() => handleSelectWord(word)}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold text-xl py-4 px-6 rounded-lg transition-all transform hover:scale-105 active:scale-95 animate-pulse"
+              onKeyPress={(e) => handleKeyPress(e, word)}
+              disabled={selected}
+              className="w-full bg-white hover:bg-neutral-200 text-black font-bold text-sm sm:text-lg py-3 sm:py-4 px-4 sm:px-6 rounded-lg transition-all duration-200 uppercase tracking-wide focus:outline-none focus:ring-4 focus:ring-white/50 disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-105 active:scale-95"
+              autoFocus={idx === 0}
+              aria-label={`Choose word: ${word}`}
             >
-              {word.toUpperCase()}
+              {word}
             </button>
           ))}
         </div>
+        <p className="text-neutral-500 text-xs text-center mt-3 sm:mt-4">
+          Choose wisely! Others will try to guess your drawing.
+        </p>
       </div>
     </div>
   );

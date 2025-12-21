@@ -13,52 +13,58 @@ try {
 }
 
 function handleGameEvents(socket, io, roomManager) {
-  socket.on('start-game', () => {
-    const room = roomManager.getRoomBySocketId(socket.id);
+  socket.on('start-game', (data) => {
+    try {
+      const room = roomManager.getRoomBySocketId(socket.id);
     
-    if (!room) {
-      socket.emit('game-error', { message: 'You are not in a room' });
-      return;
-    }
+      if (!room) {
+        socket.emit('game-error', { message: 'You are not in a room' });
+        return;
+      }
 
-    if (room.gameState) {
-      socket.emit('game-error', { message: 'Game already in progress' });
-      return;
-    }
+      if (room.gameState) {
+        socket.emit('game-error', { message: 'Game already in progress' });
+        return;
+      }
 
-    if (room.players.length < 2) {
-      socket.emit('game-error', { message: 'Need at least 2 players to start' });
-      return;
-    }
+      if (room.players.length < 2) {
+        socket.emit('game-error', { message: 'Need at least 2 players to start' });
+        return;
+      }
 
-    // Initialize game state
-    const currentDrawer = Math.floor(Math.random() * room.players.length);
-    const drawer = room.players[currentDrawer];
-    const wordOptions = getRandomWords(3);
+      // Initialize game state with custom rounds per player
+      const currentDrawer = Math.floor(Math.random() * room.players.length);
+      const drawer = room.players[currentDrawer];
+      const wordOptions = getRandomWords(3);
+      
+      // Get roundsPerPlayer from client data, default to 2 if not provided
+      const roundsPerPlayer = (data && data.roundsPerPlayer) ? Math.max(1, Math.min(5, parseInt(data.roundsPerPlayer))) : 2;
+      const maxRounds = room.players.length * roundsPerPlayer;
 
-    room.gameState = {
-      currentRound: 1,
-      maxRounds: 3,
-      currentDrawer,
-      currentWord: null,
-      timer: 90,
-      strokes: [],
-      players: room.players.map(p => ({
-        ...p,
-        hasGuessed: false
-      })),
-      startTime: Date.now()
-    };
+      room.gameState = {
+        currentRound: 1,
+        maxRounds: maxRounds,
+        roundsPerPlayer: roundsPerPlayer,
+        currentDrawer,
+        currentWord: null,
+        timer: 90,
+        strokes: [],
+        players: room.players.map(p => ({
+          ...p,
+          hasGuessed: false
+        })),
+        startTime: Date.now()
+      };
 
-    // Emit game started to all (with word options for drawer only via separate event)
-    io.to(room.code).emit('game-started', {
-      round: 1,
-      maxRounds: 3,
-      currentDrawer,
-      drawerId: drawer.id,
-      drawer: drawer.username,
-      players: room.gameState.players
-    });
+      // Emit game started to all (with word options for drawer only via separate event)
+      io.to(room.code).emit('game-started', {
+        round: 1,
+        maxRounds: maxRounds,
+        currentDrawer,
+        drawerId: drawer.id,
+        drawer: drawer.username,
+        players: room.gameState.players
+      });
 
     // Emit word choices to drawer - use a small delay to ensure socket is ready
     console.log('Emitting your-turn to drawer:', drawer.username, 'ID:', drawer.id);
@@ -91,79 +97,97 @@ function handleGameEvents(socket, io, roomManager) {
       maxRounds: 3,
       players: room.gameState.players
     });
+    } catch (error) {
+      console.error('Error in start-game:', error);
+      socket.emit('game-error', { message: 'An error occurred starting the game' });
+    }
   });
 
   socket.on('request-words', () => {
-    const room = roomManager.getRoomBySocketId(socket.id);
-    if (!room || !room.gameState) return;
-    
-    const drawer = room.gameState.players[room.gameState.currentDrawer];
-    if (drawer.id === socket.id) {
-      // This player is the drawer, send them words
-      const wordOptions = getRandomWords(3);
-      socket.emit('your-turn', {
-        words: wordOptions,
-        round: room.gameState.currentRound
-      });
+    try {
+      const room = roomManager.getRoomBySocketId(socket.id);
+      if (!room || !room.gameState) return;
+      
+      const drawer = room.gameState.players[room.gameState.currentDrawer];
+      if (drawer.id === socket.id) {
+        // This player is the drawer, send them words
+        const wordOptions = getRandomWords(3);
+        socket.emit('your-turn', {
+          words: wordOptions,
+          round: room.gameState.currentRound
+        });
+      }
+    } catch (error) {
+      console.error('Error in request-words:', error);
     }
   });
 
   socket.on('select-word', (data) => {
-    const { word } = data;
-    const room = roomManager.getRoomBySocketId(socket.id);
-    
-    if (!room || !room.gameState) {
-      socket.emit('game-error', { message: 'Game not in progress' });
-      return;
+    try {
+      const { word } = data;
+      const room = roomManager.getRoomBySocketId(socket.id);
+      
+      if (!room || !room.gameState) {
+        socket.emit('game-error', { message: 'Game not in progress' });
+        return;
+      }
+
+      const drawer = room.gameState.players[room.gameState.currentDrawer];
+      if (drawer.id !== socket.id) {
+        socket.emit('game-error', { message: 'Not your turn to draw' });
+        return;
+      }
+
+      // Validate word
+      const wordValidation = validateWord(word, wordList);
+      if (!wordValidation.valid) {
+        socket.emit('game-error', { message: wordValidation.message });
+        return;
+      }
+
+      // Set the selected word
+      room.gameState.currentWord = word;
+      room.gameState.startTime = Date.now();
+
+      // Emit word length as underscores to guessers
+      const wordLength = word.length;
+      const underscores = '_ '.repeat(wordLength).trim();
+
+      socket.to(room.code).emit('word-selected', {
+        wordLength,
+        underscores
+      });
+
+      // Emit to all that drawing has started
+      io.to(room.code).emit('drawing-started', {
+        drawer: drawer.username
+      });
+
+      // Start timer
+      timerManager.startRoundTimer(room.code, 90, roomManager, io);
+    } catch (error) {
+      console.error('Error in select-word:', error);
+      socket.emit('game-error', { message: 'An error occurred selecting word' });
     }
-
-    const drawer = room.gameState.players[room.gameState.currentDrawer];
-    if (drawer.id !== socket.id) {
-      socket.emit('game-error', { message: 'Not your turn to draw' });
-      return;
-    }
-
-    // Validate word
-    const wordValidation = validateWord(word, wordList);
-    if (!wordValidation.valid) {
-      socket.emit('game-error', { message: wordValidation.message });
-      return;
-    }
-
-    // Set the selected word
-    room.gameState.currentWord = word;
-    room.gameState.startTime = Date.now();
-
-    // Emit word length as underscores to guessers
-    const wordLength = word.length;
-    const underscores = '_ '.repeat(wordLength).trim();
-
-    socket.to(room.code).emit('word-selected', {
-      wordLength,
-      underscores
-    });
-
-    // Emit to all that drawing has started
-    io.to(room.code).emit('drawing-started', {
-      drawer: drawer.username
-    });
-
-    // Start timer
-    timerManager.startRoundTimer(room.code, 90, roomManager, io);
   });
 
   socket.on('restart-game', () => {
-    const room = roomManager.getRoomBySocketId(socket.id);
-    
-    if (!room) {
-      socket.emit('game-error', { message: 'You are not in a room' });
-      return;
+    try {
+      const room = roomManager.getRoomBySocketId(socket.id);
+      
+      if (!room) {
+        socket.emit('game-error', { message: 'You are not in a room' });
+        return;
+      }
+
+      timerManager.clearTimer(room.code);
+      resetGame(room.code, roomManager);
+
+      io.to(room.code).emit('game-reset');
+    } catch (error) {
+      console.error('Error in restart-game:', error);
+      socket.emit('game-error', { message: 'An error occurred restarting the game' });
     }
-
-    timerManager.clearTimer(room.code);
-    resetGame(room.code, roomManager);
-
-    io.to(room.code).emit('game-reset');
   });
 }
 
