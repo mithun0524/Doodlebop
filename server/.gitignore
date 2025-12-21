@@ -1,11 +1,2 @@
-\node_modules
-\dist
-\build
-\out
-\dist-ssr
-\public
-\src
-\test
-\test-results
-\test-results-*/
-\test-results-*/
+node_modules
+.env
