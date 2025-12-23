@@ -118,7 +118,6 @@ function handleGuessEvents(socket, io, roomManager, timerManager) {
       console.error('Error in send-guess:', error);
       socket.emit('game-error', { message: 'An error occurred processing your guess' });
     }
-    }
   });
 }
 
