@@ -33,8 +33,12 @@ function Canvas({ socket, isDrawer, currentWord }) {
   const [isDrawing, setIsDrawing] = useState(false);
   const [color, setColor] = useState('#000000');
   const [brushSize, setBrushSize] = useState(4);
+  const [tool, setTool] = useState('pen');
   const strokesRef = useRef([]);
+  const undoStackRef = useRef([]);
   const lastPosRef = useRef(null);
+  const lastEmitTimeRef = useRef(0);
+  const pendingStrokeRef = useRef(null);
   const [showLandscapeHint, setShowLandscapeHint] = useState(false);
   const { theme } = useTheme();
 
@@ -44,6 +48,7 @@ function Canvas({ socket, isDrawer, currentWord }) {
   const ASPECT_RATIO = 4 / 3;
   const SCALE_FACTOR = 2; // For high-DPI rendering
   const RESIZE_DEBOUNCE = 150;
+  const STROKE_THROTTLE_MS = 16; // ~60fps max emission rate
 
   // Check orientation on mobile
   useEffect(() => {
@@ -250,16 +255,47 @@ function Canvas({ socket, isDrawer, currentWord }) {
 
     const handleRoundStarted = () => {
       strokesRef.current = [];
+      undoStackRef.current = [];
       lastPosRef.current = null;
       setIsDrawing(false);
       setupCanvas();
     };
 
+    const handleUndoRemote = () => {
+      const strokes = strokesRef.current;
+      if (!strokes || strokes.length === 0) return;
+      const last = strokes[strokes.length - 1];
+      if (last && last.type === 'clear') return;
+      const popped = strokes.pop();
+      if (popped) {
+        undoStackRef.current.push(popped);
+        setupCanvas();
+      }
+    };
+
+    const handleRedoRemote = (data) => {
+      if (!data) return;
+      const stroke = {
+        x0: data.x0,
+        y0: data.y0,
+        x1: data.x1,
+        y1: data.y1,
+        color: data.color || '#000000',
+        size: data.size || 4
+      };
+      strokesRef.current.push(stroke);
+      setupCanvas();
+    };
+
     socket.on('canvas-update', handleCanvasUpdate);
+    socket.on('undo-stroke', handleUndoRemote);
+    socket.on('redo-stroke', handleRedoRemote);
     socket.on('round-started', handleRoundStarted);
 
     return () => {
       socket.off('canvas-update', handleCanvasUpdate);
+      socket.off('undo-stroke', handleUndoRemote);
+      socket.off('redo-stroke', handleRedoRemote);
       socket.off('round-started', handleRoundStarted);
     };
   }, [socket, setupCanvas, drawStroke]);
@@ -346,7 +382,7 @@ function Canvas({ socket, isDrawer, currentWord }) {
       y0: lastPosRef.current.y,
       x1: x1,
       y1: y1,
-      color: color,
+      color: tool === 'eraser' ? '#FFFFFF' : color,
       size: brushSize
     };
 
@@ -360,16 +396,36 @@ function Canvas({ socket, isDrawer, currentWord }) {
       console.error('Error drawing stroke:', error);
     }
 
-    // Store and emit
+    // Store and emit with throttling
     strokesRef.current.push(stroke);
+    // New stroke invalidates redo stack
+    undoStackRef.current = [];
     
     if (socket && socket.connected) {
-      socket.emit('draw-stroke', stroke);
+      const now = Date.now();
+      const timeSinceLastEmit = now - lastEmitTimeRef.current;
+      
+      if (timeSinceLastEmit >= STROKE_THROTTLE_MS) {
+        // Emit immediately
+        socket.emit('draw-stroke', stroke);
+        lastEmitTimeRef.current = now;
+        pendingStrokeRef.current = null;
+      } else {
+        // Store for delayed emit
+        pendingStrokeRef.current = stroke;
+        setTimeout(() => {
+          if (pendingStrokeRef.current && socket && socket.connected) {
+            socket.emit('draw-stroke', pendingStrokeRef.current);
+            lastEmitTimeRef.current = Date.now();
+            pendingStrokeRef.current = null;
+          }
+        }, STROKE_THROTTLE_MS - timeSinceLastEmit);
+      }
     }
 
     // Update last position
     lastPosRef.current = { x: x1, y: y1 };
-  }, [isDrawing, isDrawer, currentWord, color, brushSize, socket, getPointerPos, drawStroke]);
+  }, [isDrawing, isDrawer, currentWord, color, brushSize, tool, socket, getPointerPos, drawStroke]);
 
   /**
    * Stop drawing
@@ -400,11 +456,39 @@ function Canvas({ socket, isDrawer, currentWord }) {
 
     // Clear locally
     strokesRef.current = [{ type: 'clear' }];
+    undoStackRef.current = [];
     setupCanvas();
 
     // Emit clear
     if (socket && socket.connected) {
       socket.emit('clear-canvas');
+    }
+  }, [isDrawer, currentWord, socket, setupCanvas]);
+
+  const handleUndo = useCallback(() => {
+    if (!isDrawer || !currentWord) return;
+    const strokes = strokesRef.current;
+    if (!strokes || strokes.length === 0) return;
+    const last = strokes[strokes.length - 1];
+    if (last && last.type === 'clear') return;
+    const popped = strokes.pop();
+    if (popped) {
+      undoStackRef.current.push(popped);
+      setupCanvas();
+      if (socket && socket.connected) {
+        socket.emit('undo-stroke');
+      }
+    }
+  }, [isDrawer, currentWord, socket, setupCanvas]);
+
+  const handleRedo = useCallback(() => {
+    if (!isDrawer || !currentWord) return;
+    const redo = undoStackRef.current.pop();
+    if (!redo) return;
+    strokesRef.current.push(redo);
+    setupCanvas();
+    if (socket && socket.connected) {
+      socket.emit('redo-stroke', redo);
     }
   }, [isDrawer, currentWord, socket, setupCanvas]);
 
@@ -441,9 +525,11 @@ function Canvas({ socket, isDrawer, currentWord }) {
             <button
               key={c}
               onClick={() => setColor(c)}
-              className={`w-8 lg:w-10 h-8 lg:h-10 rounded-lg border-2 transition-all duration-200 ${
-                color === c ? 'border-white scale-110 ring-2 ring-white/50' : 'border-neutral-600 hover:border-white'
-              } focus:outline-none focus:ring-4 focus:ring-white/50`}
+              className={`w-9 h-9 rounded-xl border-2 transition-all duration-200 hover:scale-105 active:scale-95 ${
+                color === c 
+                  ? 'border-white ring-2 ring-white/20 scale-105' 
+                  : 'border-neutral-700 hover:border-neutral-500'
+              } focus:outline-none focus:ring-2 focus:ring-white/30`}
               style={{ backgroundColor: c }}
               disabled={!isDrawer}
               aria-label={`Color ${c}`}
@@ -452,9 +538,9 @@ function Canvas({ socket, isDrawer, currentWord }) {
           ))}
         </div>
         <div className="hidden lg:block flex-1 h-px bg-neutral-700"></div>
-        <div className="flex items-center gap-2 lg:gap-4">
-          <label htmlFor="brush-size" className="text-white text-xs lg:text-sm font-medium uppercase tracking-wide hidden sm:block">
-            Brush
+        <div className="flex items-center gap-3">
+          <label htmlFor="brush-size" className="text-white text-xs font-semibold uppercase tracking-wider hidden sm:block opacity-70">
+            Size
           </label>
           <input
             id="brush-size"
@@ -464,20 +550,100 @@ function Canvas({ socket, isDrawer, currentWord }) {
             value={brushSize}
             onChange={(e) => setBrushSize(Number(e.target.value))}
             disabled={!isDrawer}
-            className="w-20 lg:w-32 accent-white focus:outline-none focus:ring-4 focus:ring-white/50 cursor-pointer"
+            className="w-24 h-2 bg-neutral-700 rounded-full appearance-none cursor-pointer accent-white [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-lg focus:outline-none focus:ring-2 focus:ring-white/30"
             aria-label="Brush size"
           />
-          <span className="text-white text-xs lg:text-sm font-bold w-10 lg:w-12 text-right">{brushSize}px</span>
+          <span className="text-white text-sm font-bold min-w-[3rem] text-center bg-neutral-800/50 px-2.5 py-1.5 rounded-lg backdrop-blur-sm">{brushSize}px</span>
         </div>
-        <button
-          onClick={handleClear}
-          disabled={!isDrawer}
-          className="px-3 lg:px-6 py-2 rounded-lg transition-all duration-200 font-bold text-xs lg:text-sm uppercase tracking-wide focus:outline-none focus:ring-4 focus:ring-white/50"
-          style={{ backgroundColor: theme.text, color: theme.bg, opacity: !isDrawer ? 0.5 : 1 }}
-          aria-label="Clear canvas"
-        >
-          Clear
-        </button>
+        <div className="flex gap-2" role="group" aria-label="Drawing tools">
+          {/* Pen Tool */}
+          <button
+            type="button"
+            onClick={() => setTool('pen')}
+            disabled={!isDrawer}
+            className={`p-2.5 rounded-xl border transition-all duration-200 hover:scale-105 active:scale-95 ${
+              tool === 'pen' 
+                ? 'border-white bg-white/10 backdrop-blur-sm' 
+                : 'border-neutral-600/50 hover:border-neutral-400 bg-neutral-800/30'
+            }`}
+            style={{ color: theme.text }}
+            aria-pressed={tool === 'pen'}
+            title="Pen tool"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+            </svg>
+          </button>
+          
+          {/* Eraser Tool */}
+          <button
+            type="button"
+            onClick={() => setTool('eraser')}
+            disabled={!isDrawer}
+            className={`p-2.5 rounded-xl border transition-all duration-200 hover:scale-105 active:scale-95 ${
+              tool === 'eraser' 
+                ? 'border-white bg-white/10 backdrop-blur-sm' 
+                : 'border-neutral-600/50 hover:border-neutral-400 bg-neutral-800/30'
+            }`}
+            style={{ color: theme.text }}
+            aria-pressed={tool === 'eraser'}
+            title="Eraser tool"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              {/* Main eraser body - tilted rectangle */}
+              <path d="M8.5 4L18.5 4C19.6 4 20.5 4.9 20.5 6L20.5 14C20.5 15.1 19.6 16 18.5 16L8.5 16C7.4 16 6.5 15.1 6.5 14L6.5 6C6.5 4.9 7.4 4 8.5 4Z" transform="rotate(-25 13.5 10)"/>
+              {/* Divider line on eraser */}
+              <path d="M9 8L18 8" transform="rotate(-25 13.5 10)" strokeWidth="2"/>
+              {/* Eraser marks below */}
+              <path d="M6 20L8 20" strokeWidth="2.5"/>
+              <path d="M10 20L12 20" strokeWidth="2.5"/>
+              <path d="M14 20L16 20" strokeWidth="2.5"/>
+              <path d="M18 20L22 20" strokeWidth="2.5"/>
+            </svg>
+          </button>
+          
+          {/* Undo */}
+          <button
+            onClick={handleUndo}
+            disabled={!isDrawer}
+            className="p-2.5 rounded-xl border border-neutral-600/50 transition-all duration-200 hover:scale-105 hover:border-neutral-400 active:scale-95 bg-neutral-800/30 backdrop-blur-sm focus:outline-none focus:ring-2 focus:ring-white/30"
+            style={{ color: theme.text, opacity: !isDrawer ? 0.5 : 1 }}
+            aria-label="Undo"
+            title="Undo (Ctrl+Z)"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+            </svg>
+          </button>
+          
+          {/* Redo */}
+          <button
+            onClick={handleRedo}
+            disabled={!isDrawer}
+            className="p-2.5 rounded-xl border border-neutral-600/50 transition-all duration-200 hover:scale-105 hover:border-neutral-400 active:scale-95 bg-neutral-800/30 backdrop-blur-sm focus:outline-none focus:ring-2 focus:ring-white/30"
+            style={{ color: theme.text, opacity: !isDrawer ? 0.5 : 1 }}
+            aria-label="Redo"
+            title="Redo (Ctrl+Y)"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 15l6-6m0 0l-6-6m6 6H9a6 6 0 000 12h3" />
+            </svg>
+          </button>
+          
+          {/* Clear Canvas */}
+          <button
+            onClick={handleClear}
+            disabled={!isDrawer}
+            className="p-2.5 rounded-xl border border-neutral-600/50 transition-all duration-200 hover:scale-105 hover:border-neutral-400 active:scale-95 bg-neutral-800/30 backdrop-blur-sm focus:outline-none focus:ring-2 focus:ring-white/30"
+            style={{ color: theme.text, opacity: !isDrawer ? 0.5 : 1 }}
+            aria-label="Clear canvas"
+            title="Clear canvas"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 7h16M10 11v6m4-6v6M5 7l1 12a2 2 0 002 2h8a2 2 0 002-2l1-12M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
+            </svg>
+          </button>
+        </div>
       </div>
       
       {/* Canvas container - centered with letterboxing */}
@@ -493,7 +659,11 @@ function Canvas({ socket, isDrawer, currentWord }) {
           onPointerUp={handlePointerUp}
           onPointerLeave={handlePointerUp}
           onPointerCancel={handlePointerUp}
-          className={`touch-none bg-white ${isDrawer && currentWord ? 'cursor-crosshair' : 'cursor-default'}`}
+          className={`touch-none bg-white ${
+            isDrawer && currentWord 
+              ? tool === 'eraser' ? 'cursor-not-allowed' : 'cursor-crosshair'
+              : 'cursor-default'
+          }`}
           aria-label={isDrawer ? 'Drawing canvas - draw your word here' : 'Drawing canvas - watch the drawer'}
           role="img"
         />

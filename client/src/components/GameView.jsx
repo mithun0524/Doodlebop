@@ -6,13 +6,14 @@ import PlayerList from './PlayerList';
 import WordSelection from './WordSelection';
 import RoundTransition from './RoundTransition';
 
-function GameView({ socket, username, roomCode, gameState: initialGameState }) {
+function GameView({ socket, username, roomCode, gameState: initialGameState, onLeave }) {
   const [gameState, setGameState] = useState(initialGameState);
   const [currentWord, setCurrentWord] = useState(null);
   const [wordLength, setWordLength] = useState(0);
   const [timer, setTimer] = useState(90);
   const [showRoundTransition, setShowRoundTransition] = useState(false);
   const [roundEndData, setRoundEndData] = useState(null);
+  const [showConfirmExit, setShowConfirmExit] = useState(false);
   const { theme } = useTheme();
 
   // Get drawer ID from gameState - try drawerId first, then fall back to array lookup
@@ -42,20 +43,17 @@ function GameView({ socket, username, roomCode, gameState: initialGameState }) {
     };
 
     const handleCorrectGuess = (data) => {
-      // Update game state with new scores
+      // Note: Scores are now centrally updated via 'update-players' event
+      // This handler just provides local feedback
+    };
+
+    const handleUpdatePlayers = (players) => {
+      // Centralized score update from server
       setGameState(prev => {
         if (!prev) return prev;
         return {
           ...prev,
-          players: prev.players.map(p => {
-            if (p.username === data.username) {
-              return { ...p, score: p.score + data.points, hasGuessed: true };
-            }
-            if (p.username === data.drawer) {
-              return { ...p, score: p.score + data.drawerPoints };
-            }
-            return p;
-          })
+          players: players || prev.players
         };
       });
     };
@@ -104,6 +102,7 @@ function GameView({ socket, username, roomCode, gameState: initialGameState }) {
     socket.on('word-selected', handleWordSelected);
     socket.on('timer-update', handleTimerUpdate);
     socket.on('correct-guess', handleCorrectGuess);
+    socket.on('update-players', handleUpdatePlayers);
     socket.on('round-end', handleRoundEnd);
     socket.on('round-started', handleRoundStarted);
 
@@ -112,6 +111,7 @@ function GameView({ socket, username, roomCode, gameState: initialGameState }) {
       socket.off('word-selected', handleWordSelected);
       socket.off('timer-update', handleTimerUpdate);
       socket.off('correct-guess', handleCorrectGuess);
+      socket.off('update-players', handleUpdatePlayers);
       socket.off('round-end', handleRoundEnd);
       socket.off('round-started', handleRoundStarted);
     };
@@ -143,15 +143,30 @@ function GameView({ socket, username, roomCode, gameState: initialGameState }) {
               <span className="font-bold text-white">{gameState?.currentRound}/{gameState?.maxRounds}</span>
             </div>
           </div>
-          <div 
-            className="text-3xl lg:text-4xl font-black tabular-nums ml-auto"
-            role="timer"
-            aria-live="polite"
-            aria-label={`${timer} seconds remaining`}
-          >
-            <span className={timer <= 10 ? 'text-white animate-pulse' : 'text-white'}>
-              {String(timer).padStart(2, '0')}
-            </span>
+          <div className="flex items-center gap-3 ml-auto">
+            <div 
+              className="text-3xl lg:text-4xl font-black tabular-nums"
+              role="timer"
+              aria-live="polite"
+              aria-label={`${timer} seconds remaining`}
+            >
+              <span className={timer <= 10 ? 'text-white animate-pulse' : 'text-white'}>
+                {String(timer).padStart(2, '0')}
+              </span>
+            </div>
+            {/* Exit Game Button */}
+            {onLeave && (
+              <button
+                type="button"
+                onClick={() => setShowConfirmExit(true)}
+                className="px-3 lg:px-4 py-2 font-bold rounded-lg uppercase text-xs tracking-wide border-2"
+                style={{ backgroundColor: theme.bg, color: theme.text, borderColor: theme.text }}
+                aria-label="Exit game"
+                title="Exit game"
+              >
+                Exit
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -250,6 +265,46 @@ function GameView({ socket, username, roomCode, gameState: initialGameState }) {
           roundEndData={roundEndData}
           onClose={() => setShowRoundTransition(false)}
         />
+      )}
+
+      {/* Confirm Exit Modal */}
+      {showConfirmExit && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: `${theme.bg}e6` }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="confirm-exit-title"
+        >
+          <div
+            className="w-full max-w-md rounded-lg border-2 p-6"
+            style={{ backgroundColor: theme.accent, borderColor: theme.text, color: theme.text }}
+          >
+            <h2 id="confirm-exit-title" className="text-xl font-black mb-3">Exit Game?</h2>
+            <p className="text-sm mb-6" style={{ opacity: 0.85 }}>
+              Are you sure you want to leave the game? Other players will be notified you left.
+              {gameState?.players?.length === 2 && ' Since only two players are in this room, leaving will instantly declare the remaining player as the winner.'}
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                type="button"
+                className="px-4 py-2 font-bold rounded-lg uppercase text-xs tracking-wide border-2"
+                style={{ backgroundColor: theme.bg, color: theme.text, borderColor: theme.text }}
+                onClick={() => setShowConfirmExit(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="px-4 py-2 font-bold rounded-lg uppercase text-xs tracking-wide border-2"
+                style={{ backgroundColor: theme.text, color: theme.bg, borderColor: theme.text }}
+                onClick={() => { setShowConfirmExit(false); onLeave && onLeave(); }}
+              >
+                Exit Game
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

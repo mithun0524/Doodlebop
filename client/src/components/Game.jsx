@@ -97,6 +97,7 @@ function Game({ socket, username, roomCode: propRoomCode }) {
         username={username}
         roomCode={roomCode}
         gameState={gameState}
+        onLeave={handleLeaveRoom}
       />
     );
   }

@@ -45,14 +45,23 @@ io.on('connection', (socket) => {
     console.log('User disconnected:', socket.id);
     try {
       const room = roomManager.getRoomBySocketId(socket.id);
-      
       if (room) {
-        roomManager.removePlayer(socket.id);
-        
+        const updatedRoom = roomManager.removePlayer(socket.id);
+
         // Notify other players
         io.to(room.code).emit('player-left', {
-          players: room.players
+          players: updatedRoom ? updatedRoom.players : []
         });
+
+        // If a game is in progress and only one player remains, end the game immediately
+        if (updatedRoom && updatedRoom.gameState && updatedRoom.players.length === 1) {
+          try {
+            const { endGame } = require('./gameLogic');
+            endGame(updatedRoom.code, roomManager, io);
+          } catch (error) {
+            console.error('Error ending game after disconnect:', error);
+          }
+        }
       }
     } catch (error) {
       console.error('Error handling disconnect:', error);

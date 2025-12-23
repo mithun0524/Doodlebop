@@ -74,11 +74,23 @@ function handleRoomEvents(socket, io, roomManager) {
     const room = roomManager.getRoomBySocketId(socket.id);
     if (room) {
       socket.leave(room.code);
-      roomManager.removePlayer(socket.id);
+      const updatedRoom = roomManager.removePlayer(socket.id);
+
+      // Notify other players
       socket.to(room.code).emit('player-left', {
         playerId: socket.id,
-        players: room.players
+        players: updatedRoom ? updatedRoom.players : []
       });
+
+      // If a game is in progress and only one player remains, end the game immediately
+      if (updatedRoom && updatedRoom.gameState && updatedRoom.players.length === 1) {
+        try {
+          const { endGame } = require('../gameLogic');
+          endGame(updatedRoom.code, roomManager, io);
+        } catch (error) {
+          console.error('Error ending game after player left:', error);
+        }
+      }
     }
   });
 }
