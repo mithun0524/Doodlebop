@@ -1,6 +1,7 @@
 class RoomManager {
   constructor() {
     this.rooms = new Map();
+    this.sessionTokens = new Map(); // Map of sessionToken -> {roomCode, username, playerId}
   }
 
   generateRoomCode() {
@@ -10,6 +11,39 @@ class RoomManager {
       code += chars.charAt(Math.floor(Math.random() * chars.length));
     }
     return code;
+  }
+
+  generateSessionToken() {
+    return Math.random().toString(36).substring(2) + Date.now().toString(36);
+  }
+
+  createSession(roomCode, username, socketId) {
+    const sessionToken = this.generateSessionToken();
+    this.sessionTokens.set(sessionToken, {
+      roomCode,
+      username,
+      playerId: socketId,
+      createdAt: Date.now()
+    });
+    return sessionToken;
+  }
+
+  getSession(sessionToken) {
+    return this.sessionTokens.get(sessionToken);
+  }
+
+  updateSessionSocketId(sessionToken, newSocketId) {
+    const session = this.sessionTokens.get(sessionToken);
+    if (session) {
+      const oldSocketId = session.playerId;
+      session.playerId = newSocketId;
+      return { oldSocketId, session };
+    }
+    return null;
+  }
+
+  removeSession(sessionToken) {
+    this.sessionTokens.delete(sessionToken);
   }
 
   createRoom(playerData) {
@@ -22,8 +56,15 @@ class RoomManager {
     const room = {
       code,
       players: [playerData],
+      host: playerData.id,
       createdAt: Date.now(),
-      gameState: null
+      gameState: null,
+      settings: {
+        roundTime: 90,
+        maxRounds: 3,
+        maxPlayers: 8,
+        hintsEnabled: true
+      }
     };
 
     this.rooms.set(code, room);
@@ -45,6 +86,14 @@ class RoomManager {
   }
 
   removePlayer(socketId) {
+    // Find and remove session token for this socket
+    for (const [token, session] of this.sessionTokens.entries()) {
+      if (session.playerId === socketId) {
+        this.sessionTokens.delete(token);
+        break;
+      }
+    }
+    
     for (const [code, room] of this.rooms.entries()) {
       const playerIndex = room.players.findIndex(p => p.id === socketId);
       if (playerIndex !== -1) {

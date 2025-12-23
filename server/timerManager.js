@@ -1,5 +1,6 @@
 const scoringEngine = require('./scoringEngine');
 const timers = new Map();
+const hintData = new Map();
 
 function startRoundTimer(roomCode, duration, roomManager, io) {
   try {
@@ -14,9 +15,21 @@ function startRoundTimer(roomCode, duration, roomManager, io) {
 
     let timeLeft = duration;
     
+    // Initialize hints for this round (if enabled)
+    const room = roomManager.getRoom(roomCode);
+    if (room && room.gameState && room.gameState.currentWord) {
+      const hintsEnabled = room.settings?.hintsEnabled !== false;
+      if (hintsEnabled) {
+        initializeHints(roomCode, room.gameState.currentWord, duration);
+      }
+    }
+    
     const timerMgr = module.exports;
     const interval = setInterval(() => {
       timeLeft--;
+      
+      // Check if it's time to reveal a hint
+      checkAndRevealHint(roomCode, timeLeft, io);
       
       io.to(roomCode).emit('timer-update', {
         timeLeft,
@@ -26,6 +39,7 @@ function startRoundTimer(roomCode, duration, roomManager, io) {
       if (timeLeft <= 0) {
         clearInterval(interval);
         timers.delete(roomCode);
+        hintData.delete(roomCode);
         endRound(roomCode, roomManager, io, timerMgr);
       }
     }, 1000);
@@ -34,6 +48,90 @@ function startRoundTimer(roomCode, duration, roomManager, io) {
   } catch (error) {
     console.error('Error starting round timer:', error);
   }
+}
+
+function initializeHints(roomCode, word, duration) {
+  try {
+    const wordLower = word.toLowerCase();
+    const wordLength = wordLower.length;
+    
+    // Calculate hint reveal times (at 2/3 and 1/3 of time remaining)
+    const hintTimes = [];
+    if (duration >= 60) {
+      hintTimes.push(Math.floor(duration * 2/3)); // First hint at 2/3 time
+      hintTimes.push(Math.floor(duration * 1/3)); // Second hint at 1/3 time
+    } else if (duration >= 30) {
+      hintTimes.push(Math.floor(duration / 2)); // One hint at halfway
+    }
+    
+    // Choose random positions to reveal (not first or last letter)
+    const revealablePositions = [];
+    for (let i = 1; i < wordLength - 1; i++) {
+      if (wordLower[i] !== ' ') { // Don't reveal spaces
+        revealablePositions.push(i);
+      }
+    }
+    
+    // Shuffle positions
+    for (let i = revealablePositions.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [revealablePositions[i], revealablePositions[j]] = [revealablePositions[j], revealablePositions[i]];
+    }
+    
+    hintData.set(roomCode, {
+      word: wordLower,
+      hintTimes,
+      revealablePositions,
+      revealedPositions: new Set(),
+      currentHintIndex: 0
+    });
+  } catch (error) {
+    console.error('Error initializing hints:', error);
+  }
+}
+
+function checkAndRevealHint(roomCode, timeLeft, io) {
+  try {
+    const hints = hintData.get(roomCode);
+    if (!hints || hints.currentHintIndex >= hints.hintTimes.length) {
+      return;
+    }
+    
+    const nextHintTime = hints.hintTimes[hints.currentHintIndex];
+    
+    if (timeLeft === nextHintTime) {
+      // Reveal next letter(s)
+      const numToReveal = Math.min(2, hints.revealablePositions.length - hints.revealedPositions.size);
+      
+      for (let i = 0; i < numToReveal; i++) {
+        const posIndex = hints.revealedPositions.size;
+        if (posIndex < hints.revealablePositions.length) {
+          const position = hints.revealablePositions[posIndex];
+          hints.revealedPositions.add(position);
+        }
+      }
+      
+      hints.currentHintIndex++;
+      
+      // Build hint string with revealed letters
+      const hintString = buildHintString(hints.word, hints.revealedPositions);
+      
+      io.to(roomCode).emit('hint-revealed', {
+        hint: hintString,
+        revealedCount: hints.revealedPositions.size
+      });
+    }
+  } catch (error) {
+    console.error('Error checking hint reveal:', error);
+  }
+}
+
+function buildHintString(word, revealedPositions) {
+  return word.split('').map((char, index) => {
+    if (char === ' ') return ' ';
+    if (revealedPositions.has(index)) return char;
+    return '_';
+  }).join(' ');
 }
 
 function endRound(roomCode, roomManager, io, timerMgr) {
@@ -112,6 +210,7 @@ function clearTimer(roomCode) {
       clearInterval(timer);
       timers.delete(roomCode);
     }
+    hintData.delete(roomCode);
   } catch (error) {
     console.error('Error clearing timer:', error);
   }

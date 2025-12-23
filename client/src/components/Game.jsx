@@ -14,13 +14,40 @@ function Game({ socket, username, roomCode: propRoomCode }) {
   const [showGame, setShowGame] = useState(false);
   const [gameEnded, setGameEnded] = useState(false);
   const [finalScores, setFinalScores] = useState(null);
+  const [isReconnecting, setIsReconnecting] = useState(false);
 
+  // Handle session token storage
   useEffect(() => {
-    if (!socket || !roomCode) return;
+    if (!socket) return;
+
+    const handleRoomCreated = (data) => {
+      if (data.sessionToken) {
+        localStorage.setItem('sessionToken', data.sessionToken);
+        localStorage.setItem('roomCode', data.roomCode);
+        localStorage.setItem('username', username);
+      }
+    };
 
     const handleRoomJoined = (data) => {
       setPlayers(data.players || []);
+      if (data.sessionToken) {
+        localStorage.setItem('sessionToken', data.sessionToken);
+        localStorage.setItem('roomCode', roomCode);
+        localStorage.setItem('username', username);
+      }
     };
+
+    socket.on('room-created', handleRoomCreated);
+    socket.on('room-joined', handleRoomJoined);
+
+    return () => {
+      socket.off('room-created', handleRoomCreated);
+      socket.off('room-joined', handleRoomJoined);
+    };
+  }, [socket, roomCode, username]);
+
+  useEffect(() => {
+    if (!socket || !roomCode) return;
 
     const handlePlayerJoined = (data) => {
       setPlayers(data.players || []);
@@ -58,7 +85,6 @@ function Game({ socket, username, roomCode: propRoomCode }) {
       setFinalScores(null);
     };
 
-    socket.on('room-joined', handleRoomJoined);
     socket.on('player-joined', handlePlayerJoined);
     socket.on('player-left', handlePlayerLeft);
     socket.on('game-started', handleGameStarted);
@@ -66,7 +92,6 @@ function Game({ socket, username, roomCode: propRoomCode }) {
     socket.on('game-reset', handleGameReset);
 
     return () => {
-      socket.off('room-joined', handleRoomJoined);
       socket.off('player-joined', handlePlayerJoined);
       socket.off('player-left', handlePlayerLeft);
       socket.off('game-started', handleGameStarted);

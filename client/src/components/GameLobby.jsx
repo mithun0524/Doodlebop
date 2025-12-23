@@ -3,9 +3,14 @@ import { useTheme } from '../context/ThemeContext';
 
 function GameLobby({ socket, username, roomCode, players, setPlayers, onLeave }) {
   const [error, setError] = useState('');
-  const [roundsPerPlayer, setRoundsPerPlayer] = useState(2);
   const [copied, setCopied] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
+  const [settings, setSettings] = useState({
+    roundTime: 90,
+    maxRounds: 3,
+    maxPlayers: 8,
+    hintsEnabled: true
+  });
   const { theme } = useTheme();
 
   const isHost = players.length > 0 && players[0]?.username === username;
@@ -16,6 +21,9 @@ function GameLobby({ socket, username, roomCode, players, setPlayers, onLeave })
     const handleRoomJoined = (data) => {
       console.log('GameLobby: Received room-joined', data);
       setPlayers(data.players || []);
+      if (data.settings) {
+        setSettings(data.settings);
+      }
     };
 
     const handlePlayerJoined = (data) => {
@@ -30,18 +38,32 @@ function GameLobby({ socket, username, roomCode, players, setPlayers, onLeave })
 
     const handleGameError = (data) => {
       setError(data.message);
+      setIsStarting(false);
+    };
+
+    const handleSettingsUpdated = (data) => {
+      setSettings(data.settings);
+    };
+
+    const handleSettingsError = (data) => {
+      setError(data.message);
+      setTimeout(() => setError(''), 5000);
     };
 
     socket.on('room-joined', handleRoomJoined);
     socket.on('player-joined', handlePlayerJoined);
     socket.on('player-left', handlePlayerLeft);
     socket.on('game-error', handleGameError);
+    socket.on('settings-updated', handleSettingsUpdated);
+    socket.on('settings-error', handleSettingsError);
 
     return () => {
       socket.off('room-joined', handleRoomJoined);
       socket.off('player-joined', handlePlayerJoined);
       socket.off('player-left', handlePlayerLeft);
       socket.off('game-error', handleGameError);
+      socket.off('settings-updated', handleSettingsUpdated);
+      socket.off('settings-error', handleSettingsError);
     };
   }, [socket, setPlayers]);
 
@@ -53,7 +75,15 @@ function GameLobby({ socket, username, roomCode, players, setPlayers, onLeave })
     }
     setError('');
     setIsStarting(true);
-    socket.emit('start-game', { roundsPerPlayer });
+    socket.emit('start-game');
+  };
+
+  const handleSettingChange = (key, value) => {
+    if (!isHost) return;
+    
+    const newSettings = { ...settings, [key]: value };
+    setSettings(newSettings);
+    socket.emit('update-settings', { settings: newSettings });
   };
 
   const handleCopyCode = async () => {
@@ -101,10 +131,122 @@ function GameLobby({ socket, username, roomCode, players, setPlayers, onLeave })
           </div>
         )}
 
+        {/* Game Settings - Only visible to host */}
+        {isHost && (
+          <div 
+            className="p-6 rounded-lg border-2 space-y-4"
+            style={{ backgroundColor: theme.accent, borderColor: theme.text }}
+          >
+            <h2 className="text-lg font-bold mb-4" style={{ color: theme.text }}>
+              Game Settings
+            </h2>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Round Time */}
+              <div>
+                <label className="block text-sm font-medium mb-2" style={{ color: theme.text }}>
+                  Round Time: {settings.roundTime}s
+                </label>
+                <input
+                  type="range"
+                  min="30"
+                  max="180"
+                  step="15"
+                  value={settings.roundTime}
+                  onChange={(e) => handleSettingChange('roundTime', parseInt(e.target.value))}
+                  className="w-full h-2 bg-neutral-700 rounded-full appearance-none cursor-pointer accent-white"
+                />
+                <div className="flex justify-between text-xs mt-1" style={{ color: theme.text, opacity: 0.6 }}>
+                  <span>30s</span>
+                  <span>180s</span>
+                </div>
+              </div>
+
+              {/* Max Rounds */}
+              <div>
+                <label className="block text-sm font-medium mb-2" style={{ color: theme.text }}>
+                  Max Rounds: {settings.maxRounds}
+                </label>
+                <input
+                  type="range"
+                  min="1"
+                  max="10"
+                  step="1"
+                  value={settings.maxRounds}
+                  onChange={(e) => handleSettingChange('maxRounds', parseInt(e.target.value))}
+                  className="w-full h-2 bg-neutral-700 rounded-full appearance-none cursor-pointer accent-white"
+                />
+                <div className="flex justify-between text-xs mt-1" style={{ color: theme.text, opacity: 0.6 }}>
+                  <span>1</span>
+                  <span>10</span>
+                </div>
+              </div>
+
+              {/* Max Players */}
+              <div>
+                <label className="block text-sm font-medium mb-2" style={{ color: theme.text }}>
+                  Max Players: {settings.maxPlayers}
+                </label>
+                <input
+                  type="range"
+                  min="2"
+                  max="12"
+                  step="1"
+                  value={settings.maxPlayers}
+                  onChange={(e) => handleSettingChange('maxPlayers', parseInt(e.target.value))}
+                  className="w-full h-2 bg-neutral-700 rounded-full appearance-none cursor-pointer accent-white"
+                />
+                <div className="flex justify-between text-xs mt-1" style={{ color: theme.text, opacity: 0.6 }}>
+                  <span>2</span>
+                  <span>12</span>
+                </div>
+              </div>
+
+              {/* Hints Toggle */}
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium" style={{ color: theme.text }}>
+                  Enable Hints
+                </label>
+                <button
+                  onClick={() => handleSettingChange('hintsEnabled', !settings.hintsEnabled)}
+                  className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors ${
+                    settings.hintsEnabled ? 'bg-white' : 'bg-neutral-600'
+                  }`}
+                  aria-pressed={settings.hintsEnabled}
+                >
+                  <span
+                    className={`inline-block h-6 w-6 transform rounded-full bg-neutral-900 transition-transform ${
+                      settings.hintsEnabled ? 'translate-x-7' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Settings Display for Non-Host Players */}
+        {!isHost && (
+          <div 
+            className="p-4 rounded-lg border-2"
+            style={{ backgroundColor: theme.accent, borderColor: theme.text, opacity: 0.8 }}
+          >
+            <h3 className="text-sm font-medium mb-2 uppercase tracking-wide" style={{ color: theme.text }}>
+              Game Settings
+            </h3>
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div>Round Time: <span className="font-bold">{settings.roundTime}s</span></div>
+              <div>Max Rounds: <span className="font-bold">{settings.maxRounds}</span></div>
+              <div>Max Players: <span className="font-bold">{settings.maxPlayers}</span></div>
+              <div>Hints: <span className="font-bold">{settings.hintsEnabled ? 'On' : 'Off'}</span></div>
+            </div>
+          </div>
+        )}
+
         <div className="mb-2 sm:mb-4">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-sm font-medium uppercase tracking-wide" style={{ color: theme.text, opacity: 0.7 }}>
-              Players ({players.length})
+              Players ({players.length}/{settings.maxPlayers})
             </h2>
             <button
               onClick={handleCopyCode}
@@ -140,38 +282,6 @@ function GameLobby({ socket, username, roomCode, players, setPlayers, onLeave })
             ))}
           </div>
         </div>
-
-        {isHost && (
-          <div className="mb-8 p-5 rounded-lg border-2" style={{ backgroundColor: theme.accent, borderColor: theme.text }}>
-            <label htmlFor="rounds-slider" className="block font-medium mb-4" style={{ color: theme.text }}>
-              Rounds per player: <span className="font-bold">{roundsPerPlayer}</span>
-            </label>
-            <input
-              id="rounds-slider"
-              type="range"
-              min="1"
-              max="5"
-              value={roundsPerPlayer}
-              onChange={(e) => setRoundsPerPlayer(parseInt(e.target.value))}
-              className="w-full h-2 rounded-full appearance-none cursor-pointer accent-white focus:outline-none focus:ring-4 focus:ring-white/50"
-              style={{ backgroundColor: theme.bg }}
-              aria-label="Select rounds per player"
-              aria-valuemin="1"
-              aria-valuemax="5"
-              aria-valuenow={roundsPerPlayer}
-            />
-            <div className="flex justify-between text-xs mt-2" style={{ color: theme.text, opacity: 0.6 }}>
-              <span>1</span>
-              <span>2</span>
-              <span>3</span>
-              <span>4</span>
-              <span>5</span>
-            </div>
-            <p className="text-sm mt-3" style={{ color: theme.text, opacity: 0.8 }}>
-              Total: <span className="font-bold" style={{ color: theme.text }}>{players.length * roundsPerPlayer}</span> rounds
-            </p>
-          </div>
-        )}
 
         {isHost ? (
           players.length < 2 ? (

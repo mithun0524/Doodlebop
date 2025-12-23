@@ -14,6 +14,7 @@ function GameView({ socket, username, roomCode, gameState: initialGameState, onL
   const [showRoundTransition, setShowRoundTransition] = useState(false);
   const [roundEndData, setRoundEndData] = useState(null);
   const [showConfirmExit, setShowConfirmExit] = useState(false);
+  const [currentHint, setCurrentHint] = useState('');
   const { theme } = useTheme();
 
   // Get drawer ID from gameState - try drawerId first, then fall back to array lookup
@@ -86,6 +87,7 @@ function GameView({ socket, username, roomCode, gameState: initialGameState, onL
       setTimer(90);
       setShowRoundTransition(false);
       setRoundEndData(null);
+      setCurrentHint('');
       // Update game state with new drawer and players
       if (data.currentDrawer !== undefined && data.players) {
         setGameState(prev => ({
@@ -98,6 +100,10 @@ function GameView({ socket, username, roomCode, gameState: initialGameState, onL
       }
     };
 
+    const handleHintRevealed = (data) => {
+      setCurrentHint(data.hint);
+    };
+
     socket.on('drawing-started', handleDrawingStarted);
     socket.on('word-selected', handleWordSelected);
     socket.on('timer-update', handleTimerUpdate);
@@ -105,6 +111,7 @@ function GameView({ socket, username, roomCode, gameState: initialGameState, onL
     socket.on('update-players', handleUpdatePlayers);
     socket.on('round-end', handleRoundEnd);
     socket.on('round-started', handleRoundStarted);
+    socket.on('hint-revealed', handleHintRevealed);
 
     return () => {
       socket.off('drawing-started', handleDrawingStarted);
@@ -114,6 +121,7 @@ function GameView({ socket, username, roomCode, gameState: initialGameState, onL
       socket.off('update-players', handleUpdatePlayers);
       socket.off('round-end', handleRoundEnd);
       socket.off('round-started', handleRoundStarted);
+      socket.off('hint-revealed', handleHintRevealed);
     };
   }, [socket]);
 
@@ -187,6 +195,24 @@ function GameView({ socket, username, roomCode, gameState: initialGameState, onL
 
         {/* Center - Canvas (Takes remaining space) */}
         <div className="flex-1 p-2 lg:p-4 flex flex-col overflow-hidden min-h-0">
+          {/* Hint Display */}
+          {!isDrawer && currentHint && (
+            <div className="mb-3 text-center">
+              <div 
+                className="inline-block px-4 py-2 rounded-lg border-2 backdrop-blur-sm"
+                style={{ 
+                  backgroundColor: `${theme.accent}cc`,
+                  borderColor: theme.text,
+                  color: theme.text
+                }}
+              >
+                <div className="text-xs uppercase tracking-wider opacity-70 mb-1">Hint</div>
+                <div className="text-xl lg:text-2xl font-mono font-bold tracking-widest">
+                  {currentHint}
+                </div>
+              </div>
+            </div>
+          )}
           <Canvas
             socket={socket}
             isDrawer={isDrawer}

@@ -32,14 +32,15 @@ function handleGameEvents(socket, io, roomManager) {
         return;
       }
 
-      // Initialize game state with custom rounds per player
+      // Initialize game state with custom settings
       const currentDrawer = Math.floor(Math.random() * room.players.length);
       const drawer = room.players[currentDrawer];
       const wordOptions = getRandomWords(3);
       
-      // Get roundsPerPlayer from client data, default to 2 if not provided
-      const roundsPerPlayer = (data && data.roundsPerPlayer) ? Math.max(1, Math.min(5, parseInt(data.roundsPerPlayer))) : 2;
-      const maxRounds = room.players.length * roundsPerPlayer;
+      // Use room settings
+      const maxRounds = room.settings?.maxRounds || 3;
+      const roundTime = room.settings?.roundTime || 90;
+      const roundsPerPlayer = Math.ceil(maxRounds / room.players.length);
 
       room.gameState = {
         currentRound: 1,
@@ -47,7 +48,7 @@ function handleGameEvents(socket, io, roomManager) {
         roundsPerPlayer: roundsPerPlayer,
         currentDrawer,
         currentWord: null,
-        timer: 90,
+        timer: roundTime,
         strokes: [],
         players: room.players.map(p => ({
           ...p,
@@ -94,7 +95,7 @@ function handleGameEvents(socket, io, roomManager) {
       drawerId: drawer.id,
       currentDrawer,
       round: 1,
-      maxRounds: 3,
+      maxRounds: maxRounds,
       players: room.gameState.players
     });
     } catch (error) {

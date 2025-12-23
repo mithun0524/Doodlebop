@@ -1,4 +1,33 @@
 const scoringEngine = require('../scoringEngine');
+const stringSimilarity = require('string-similarity');
+
+// Calculate Levenshtein distance
+function levenshteinDistance(str1, str2) {
+  const len1 = str1.length;
+  const len2 = str2.length;
+  const matrix = [];
+
+  for (let i = 0; i <= len1; i++) {
+    matrix[i] = [i];
+  }
+
+  for (let j = 0; j <= len2; j++) {
+    matrix[0][j] = j;
+  }
+
+  for (let i = 1; i <= len1; i++) {
+    for (let j = 1; j <= len2; j++) {
+      const cost = str1[i - 1] === str2[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,      // deletion
+        matrix[i][j - 1] + 1,      // insertion
+        matrix[i - 1][j - 1] + cost // substitution
+      );
+    }
+  }
+
+  return matrix[len1][len2];
+}
 
 function handleGuessEvents(socket, io, roomManager, timerManager) {
   socket.on('send-guess', (data) => {
@@ -107,7 +136,22 @@ function handleGuessEvents(socket, io, roomManager, timerManager) {
           timerManager.endRound(room.code, roomManager, io, timerManager);
         }
       } else {
-        // Wrong guess - show as normal message
+        // Check for close guess using fuzzy matching
+        const distance = levenshteinDistance(normalizedGuess, normalizedWord);
+        const similarity = stringSimilarity.compareTwoStrings(normalizedGuess, normalizedWord);
+        
+        // Close guess threshold: distance <= 2 OR similarity > 0.6
+        const isCloseGuess = distance <= 2 || similarity > 0.6;
+        
+        if (isCloseGuess && !player.hasGuessed) {
+          // Send close guess feedback to the player only
+          socket.emit('close-guess', {
+            guess: guess,
+            message: "You're very close! Keep trying!"
+          });
+        }
+        
+        // Show as normal message to everyone
         io.to(room.code).emit('new-message', {
           username: player.username,
           message: guess,

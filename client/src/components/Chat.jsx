@@ -71,14 +71,43 @@ function Chat({ socket, isDrawer, currentWord, wordLength }) {
       ]);
     };
 
+    const handleHintRevealed = (data) => {
+      playSound('correctGuess');
+      setMessages((prev) => [
+        ...prev,
+        {
+          username: 'System',
+          message: data.hint,
+          type: 'hint',
+          icon: 'lightbulb'
+        }
+      ]);
+    };
+
+    const handleCloseGuess = (data) => {
+      setMessages((prev) => [
+        ...prev,
+        {
+          username: 'System',
+          message: data.message,
+          type: 'close-guess',
+          icon: 'fire'
+        }
+      ]);
+    };
+
     socket.on('new-message', handleNewMessage);
     socket.on('correct-guess', handleCorrectGuess);
     socket.on('word-selected', handleWordSelected);
+    socket.on('hint-revealed', handleHintRevealed);
+    socket.on('close-guess', handleCloseGuess);
 
     return () => {
       socket.off('new-message', handleNewMessage);
       socket.off('correct-guess', handleCorrectGuess);
       socket.off('word-selected', handleWordSelected);
+      socket.off('hint-revealed', handleHintRevealed);
+      socket.off('close-guess', handleCloseGuess);
     };
   }, [socket]);
 
@@ -127,19 +156,51 @@ function Chat({ socket, isDrawer, currentWord, wordLength }) {
             className={`p-3 rounded text-sm transition-all duration-200 ${
               msg.type === 'correct' || msg.type === 'drawer-bonus'
                 ? 'font-medium'
+                : msg.type === 'hint'
+                ? 'font-medium border-2'
+                : msg.type === 'close-guess'
+                ? 'font-medium animate-pulse'
                 : msg.type === 'system'
                 ? 'text-xs italic'
                 : ''
             }`}
             style={{
-              backgroundColor: msg.type === 'correct' || msg.type === 'drawer-bonus' ? theme.text : theme.bg,
+              backgroundColor: msg.type === 'correct' || msg.type === 'drawer-bonus' 
+                ? theme.text 
+                : msg.type === 'hint'
+                ? `${theme.text}20`
+                : msg.type === 'close-guess'
+                ? '#fbbf2480'
+                : theme.bg,
               color: msg.type === 'correct' || msg.type === 'drawer-bonus' ? theme.bg : theme.text,
-              border: `1px solid ${theme.text}`
+              border: msg.type === 'hint' 
+                ? `2px solid ${theme.text}` 
+                : msg.type === 'close-guess'
+                ? '2px solid #fbbf24'
+                : `1px solid ${theme.text}`
             }}
             role="article"
           >
-            <span className="font-bold">{msg.username}</span>
-            <span className="opacity-80">: {msg.message}</span>
+            <div className="flex items-start gap-2">
+              {msg.icon && (
+                <div className="flex-shrink-0 mt-0.5">
+                  {msg.icon === 'lightbulb' && (
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                    </svg>
+                  )}
+                  {msg.icon === 'fire' && (
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M12 23a7.5 7.5 0 0 1-5.138-12.963C8.204 8.774 11.5 6.5 11 1.5c6 4 9 8 3 14 1 0 2.5 0 5-2.47.27.773.5 1.604.5 2.47A7.5 7.5 0 0 1 12 23z"/>
+                    </svg>
+                  )}
+                </div>
+              )}
+              <div className="flex-1">
+                <span className="font-bold">{msg.username}</span>
+                <span className="opacity-80">: {msg.message}</span>
+              </div>
+            </div>
           </div>
         ))}
         <div ref={messagesEndRef} />
