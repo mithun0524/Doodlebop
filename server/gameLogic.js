@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const scoringEngine = require('./scoringEngine');
 
 const WORDS_FILE = path.join(__dirname, 'words.json');
 let words = [];
@@ -37,6 +38,15 @@ function nextRound(roomCode, roomManager, io, timerManager) {
     const { currentRound, maxRounds, players } = room.gameState;
     console.log('nextRound: Current round:', currentRound, 'Max rounds:', maxRounds);
     
+    // Validate players array
+    if (!Array.isArray(players) || players.length === 0) {
+      console.error('nextRound: Invalid players array');
+      return;
+    }
+
+    // Validate player scores before proceeding
+    scoringEngine.validatePlayerScores(players);
+
     // Reset round state and increment round counter
     room.gameState.currentRound++;
     room.gameState.currentDrawer = (room.gameState.currentDrawer + 1) % players.length;
@@ -55,13 +65,18 @@ function nextRound(roomCode, roomManager, io, timerManager) {
     
     console.log('nextRound: Starting round', room.gameState.currentRound);
     
-    // Reset all players' guessed status
+    // Reset all players' guessed status for new round
     players.forEach(player => {
       player.hasGuessed = false;
     });
 
     // Get drawer socket
     const drawer = players[room.gameState.currentDrawer];
+    
+    if (!drawer) {
+      console.error('nextRound: Drawer not found at index:', room.gameState.currentDrawer);
+      return;
+    }
     
     // Select 3 words for drawer to choose from
     const wordOptions = getRandomWords(3);
@@ -111,8 +126,19 @@ function endGame(roomCode, roomManager, io) {
     const timerManager = require('./timerManager');
     timerManager.clearTimer(roomCode);
     
-    const players = [...room.gameState.players].sort((a, b) => b.score - a.score);
-    const winner = players[0];
+    const players = room.gameState.players;
+
+    // Validate all scores before final sorting
+    scoringEngine.validatePlayerScores(players);
+
+    // Get sorted leaderboard
+    const leaderboard = scoringEngine.getLeaderboard(players);
+    const winner = leaderboard[0];
+
+    if (!winner) {
+      console.error('endGame: No winner found');
+      return;
+    }
 
     console.log('endGame: Emitting game-ended event with winner:', winner.username);
     io.to(roomCode).emit('game-ended', {
@@ -120,10 +146,16 @@ function endGame(roomCode, roomManager, io) {
         username: winner.username,
         score: winner.score
       },
-      scores: players.map(p => ({
+      scores: leaderboard.map(p => ({
         username: p.username,
-        score: p.score
-      }))
+        score: p.score,
+        streak: p.streak || 0
+      })),
+      finalStats: {
+        totalRounds: room.gameState.currentRound,
+        maxRounds: room.gameState.maxRounds,
+        totalPlayers: players.length
+      }
     });
 
     // Clear game state immediately to prevent further rounds
@@ -139,11 +171,10 @@ function resetGame(roomCode, roomManager) {
     const room = roomManager.getRoom(roomCode);
     if (!room) return;
 
-    // Reset all player scores and states
-    room.players.forEach(player => {
-      player.score = 0;
-      player.hasGuessed = false;
-    });
+    // Reset all player scores and states using scoring engine
+    if (room.players && Array.isArray(room.players)) {
+      scoringEngine.resetScores(room.players);
+    }
 
     // Clear game state
     room.gameState = null;

@@ -1,0 +1,360 @@
+import { useEffect, useRef, useState } from 'react';
+import { useTheme } from '../context/ThemeContext';
+
+function Canvas({ socket, isDrawer, currentWord }) {
+  const canvasRef = useRef(null);
+  const containerRef = useRef(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [color, setColor] = useState('#000000');
+  const [brushSize, setBrushSize] = useState(4);
+  const strokesRef = useRef([]);
+  const [showLandscapeHint, setShowLandscapeHint] = useState(false);
+  const { theme } = useTheme();
+
+  const colors = ['#000000', '#FFFFFF', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF'];
+
+  // Check orientation on mobile
+  useEffect(() => {
+    const checkOrientation = () => {
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      const isPortrait = window.innerHeight > window.innerWidth;
+      setShowLandscapeHint(isMobile && isPortrait);
+    };
+    
+    checkOrientation();
+    window.addEventListener('resize', checkOrientation);
+    return () => window.removeEventListener('resize', checkOrientation);
+  }, []);
+
+  // Handle canvas resizing and high-DPI rendering with fixed aspect ratio (4:3) and letterboxing
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const container = containerRef.current;
+    if (!canvas || !container) return;
+
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const targetAspect = 4 / 3;
+    let resizeTimeout;
+    
+    const resizeCanvas = () => {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => {
+        const rect = container.getBoundingClientRect();
+        const maxW = rect.width;
+        const maxH = rect.height;
+
+        // Fit target aspect into container (letterbox)
+        let displayW, displayH;
+        if (maxW / maxH > targetAspect) {
+          displayH = maxH;
+          displayW = displayH * targetAspect;
+        } else {
+          displayW = maxW;
+          displayH = displayW / targetAspect;
+        }
+
+        displayW = Math.floor(displayW);
+        displayH = Math.floor(displayH);
+
+        // Avoid resize if dimensions haven't changed significantly
+        if (Math.abs(canvas.width / dpr - displayW) < 1 && 
+            Math.abs(canvas.height / dpr - displayH) < 1) {
+          return;
+        }
+        
+        // Set actual resolution (devicePixelRatio for crisp rendering)
+        canvas.width = displayW * dpr;
+        canvas.height = displayH * dpr;
+        
+        // Set display size (no margins; centering handled by parent flex)
+        canvas.style.width = displayW + 'px';
+        canvas.style.height = displayH + 'px';
+
+        // Reset any existing transforms then scale for high DPI
+        if (ctx.setTransform) ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.scale(dpr, dpr);
+        
+        // Fill with white
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, displayW, displayH);
+        
+        // Redraw all strokes with normalized coordinates using display dimensions
+        strokesRef.current.forEach(stroke => {
+          if (stroke.type === 'clear') {
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(0, 0, displayW, displayH);
+          } else {
+            const prevX = (stroke.prevXNorm ?? 0) * displayW;
+            const prevY = (stroke.prevYNorm ?? 0) * displayH;
+            const x = (stroke.xNorm ?? 0) * displayW;
+            const y = (stroke.yNorm ?? 0) * displayH;
+            ctx.strokeStyle = stroke.color;
+            ctx.lineWidth = stroke.size;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            ctx.moveTo(prevX, prevY);
+            ctx.lineTo(x, y);
+            ctx.stroke();
+          }
+        });
+      }, 50);
+    };
+
+    resizeCanvas();
+    const resizeObserver = new ResizeObserver(resizeCanvas);
+    resizeObserver.observe(container);
+
+    return () => {
+      clearTimeout(resizeTimeout);
+      resizeObserver.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleCanvasUpdate = (data) => {
+      if (data.type === 'clear') {
+        strokesRef.current = [];
+        const canvas = canvasRef.current;
+        if (canvas) {
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+      } else {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const rect = canvas.getBoundingClientRect();
+        
+        // Store normalized coordinates
+        const stroke = {
+          xNorm: data.xNorm ?? (data.x ?? 0) / rect.width,
+          yNorm: data.yNorm ?? (data.y ?? 0) / rect.height,
+          prevXNorm: data.prevXNorm ?? (data.prevX ?? data.x ?? 0) / rect.width,
+          prevYNorm: data.prevYNorm ?? (data.prevY ?? data.y ?? 0) / rect.height,
+          color: data.color,
+          size: data.size
+        };
+
+        strokesRef.current.push(stroke);
+
+        // Draw using display dimensions
+        const ctx = canvas.getContext('2d');
+        ctx.strokeStyle = stroke.color;
+        ctx.lineWidth = stroke.size;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(stroke.prevXNorm * rect.width, stroke.prevYNorm * rect.height);
+        ctx.lineTo(stroke.xNorm * rect.width, stroke.yNorm * rect.height);
+        ctx.stroke();
+      }
+    };
+
+    const handleRoundStarted = () => {
+      // Clear canvas on new round
+      strokesRef.current = [];
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
+    };
+
+    socket.on('canvas-update', handleCanvasUpdate);
+    socket.on('round-started', handleRoundStarted);
+
+    return () => {
+      socket.off('canvas-update', handleCanvasUpdate);
+      socket.off('round-started', handleRoundStarted);
+    };
+  }, [socket]);
+
+  const getCoordinates = (e) => {
+    const canvas = canvasRef.current;
+    const container = containerRef.current;
+    if (!canvas || !container) return { x: 0, y: 0, width: 1, height: 1 };
+    
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX || e.touches?.[0]?.clientX || 0) - rect.left;
+    const y = (e.clientY || e.touches?.[0]?.clientY || 0) - rect.top;
+    
+    return {
+      x,
+      y,
+      width: rect.width,
+      height: rect.height
+    };
+  };
+
+  const startDrawing = (e) => {
+    if (!isDrawer || !currentWord) return;
+    if (e.pointerType === 'touch') {
+      e.stopPropagation();
+    }
+    const canvas = canvasRef.current;
+    canvas?.setPointerCapture?.(e.pointerId);
+    setIsDrawing(true);
+    const coords = getCoordinates(e);
+    
+    const norm = {
+      xNorm: coords.x / coords.width,
+      yNorm: coords.y / coords.height,
+      prevXNorm: coords.x / coords.width,
+      prevYNorm: coords.y / coords.height,
+      color,
+      size: brushSize
+    };
+    strokesRef.current.push(norm);
+  };
+
+  const draw = (e) => {
+    if (!isDrawing || !isDrawer || !currentWord) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    const coords = getCoordinates(e);
+    const lastStroke = strokesRef.current[strokesRef.current.length - 1];
+    
+    const rect = canvas.getBoundingClientRect();
+    
+    ctx.strokeStyle = color;
+    ctx.lineWidth = brushSize;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo((lastStroke.xNorm ?? 0) * rect.width, (lastStroke.yNorm ?? 0) * rect.height);
+    ctx.lineTo(coords.x, coords.y);
+    ctx.stroke();
+
+    const strokeData = {
+      xNorm: coords.x / coords.width,
+      yNorm: coords.y / coords.height,
+      prevXNorm: lastStroke.xNorm,
+      prevYNorm: lastStroke.yNorm,
+      color,
+      size: brushSize
+    };
+    strokesRef.current.push(strokeData);
+    socket.emit('draw-stroke', strokeData);
+  };
+
+  const stopDrawing = (e) => {
+    if (!isDrawing) return;
+    const canvas = canvasRef.current;
+    canvas?.releasePointerCapture?.(e.pointerId);
+    setIsDrawing(false);
+  };
+
+  const handleClear = () => {
+    if (!isDrawer || !currentWord) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    strokesRef.current = [];
+    socket.emit('clear-canvas');
+  };
+
+  // Only show waiting message if user is drawer but hasn't selected word yet
+  // Non-drawers should see the canvas (even if empty) to see what's being drawn
+  if (!currentWord && isDrawer) {
+    return (
+      <div className="bg-neutral-900 rounded-lg p-8 text-center border-2 border-neutral-800">
+        <p className="text-neutral-400 text-sm">Please select a word to draw from the options above</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full w-full" style={{ color: theme.text }}>
+      {/* Landscape hint for mobile */}
+      {showLandscapeHint && (
+        <div className="bg-yellow-500 text-black px-4 py-2 text-center text-sm font-semibold flex items-center justify-center gap-2 flex-shrink-0">
+          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+            <path d="M2 4a2 2 0 012-2h12a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4zm3 1a1 1 0 011-1h8a1 1 0 011 1v8a1 1 0 01-1 1H6a1 1 0 01-1-1V5z"/>
+          </svg>
+          <span>Rotate your device to landscape mode for better experience!</span>
+        </div>
+      )}
+      
+      {/* Toolbar - Compact and responsive */}
+      <div 
+        className="rounded-lg p-3 lg:p-4 mb-3 lg:mb-4 border-2 flex items-center gap-3 lg:gap-6 flex-wrap lg:flex-nowrap flex-shrink-0"
+        style={{ backgroundColor: theme.accent, borderColor: theme.text }}
+      >
+        <div className="flex gap-2" role="group" aria-label="Color palette">
+          {colors.map((c) => (
+            <button
+              key={c}
+              onClick={() => setColor(c)}
+              className={`w-8 lg:w-10 h-8 lg:h-10 rounded-lg border-2 transition-all duration-200 ${color === c ? 'border-white scale-110 ring-2 ring-white/50' : 'border-neutral-600 hover:border-white'} focus:outline-none focus:ring-4 focus:ring-white/50`}
+              style={{ backgroundColor: c }}
+              disabled={!isDrawer}
+              aria-label={`Color ${c}`}
+              aria-pressed={color === c}
+            />
+          ))}
+        </div>
+        <div className="hidden lg:block flex-1 h-px bg-neutral-700"></div>
+        <div className="flex items-center gap-2 lg:gap-4">
+          <label htmlFor="brush-size" className="text-white text-xs lg:text-sm font-medium uppercase tracking-wide hidden sm:block">Brush</label>
+          <input
+            id="brush-size"
+            type="range"
+            min="2"
+            max="30"
+            value={brushSize}
+            onChange={(e) => setBrushSize(Number(e.target.value))}
+            disabled={!isDrawer}
+            className="w-20 lg:w-32 accent-white focus:outline-none focus:ring-4 focus:ring-white/50 cursor-pointer"
+            aria-label="Brush size"
+            aria-valuemin="2"
+            aria-valuemax="30"
+            aria-valuenow={brushSize}
+          />
+          <span className="text-white text-xs lg:text-sm font-bold w-10 lg:w-12 text-right">{brushSize}px</span>
+        </div>
+        <button
+          onClick={handleClear}
+          disabled={!isDrawer}
+          className="px-3 lg:px-6 py-2 rounded-lg transition-all duration-200 font-bold text-xs lg:text-sm uppercase tracking-wide focus:outline-none focus:ring-4 focus:ring-white/50"
+          style={{ backgroundColor: theme.text, color: theme.bg, opacity: !isDrawer ? 0.5 : 1 }}
+          aria-label="Clear canvas"
+        >
+          Clear
+        </button>
+      </div>
+      
+      {/* Canvas - Full remaining height */}
+      <div 
+        ref={containerRef} 
+        className="flex-1 overflow-hidden rounded-lg border-2 flex items-center justify-center" 
+        style={{ touchAction: 'none', borderColor: theme.text, backgroundColor: 'white' }}
+      >
+        <canvas
+          ref={canvasRef}
+          onPointerDown={startDrawing}
+          onPointerMove={draw}
+          onPointerUp={stopDrawing}
+          onPointerLeave={stopDrawing}
+          onPointerCancel={stopDrawing}
+          className={`touch-none bg-white ${isDrawer ? 'cursor-crosshair' : 'cursor-default'}`}
+          aria-label={isDrawer ? 'Drawing canvas - draw your word here' : 'Drawing canvas - watch the drawer'}
+          role="img"
+        />
+      </div>
+    </div>
+  );
+}
+
+export default Canvas;
+

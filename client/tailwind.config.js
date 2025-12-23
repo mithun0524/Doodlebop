@@ -13,6 +13,11 @@ export default {
           500: '#0ea5e9',
           600: '#0284c7',
           700: '#0369a1',
+        },
+        theme: {
+          bg: 'var(--bg-color)',
+          text: 'var(--text-color)',
+          accent: 'var(--accent-color)',
         }
       }
     },

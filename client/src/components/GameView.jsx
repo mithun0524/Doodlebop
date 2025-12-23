@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useTheme } from '../context/ThemeContext';
 import Canvas from './Canvas';
 import Chat from './Chat';
 import PlayerList from './PlayerList';
@@ -12,6 +13,7 @@ function GameView({ socket, username, roomCode, gameState: initialGameState }) {
   const [timer, setTimer] = useState(90);
   const [showRoundTransition, setShowRoundTransition] = useState(false);
   const [roundEndData, setRoundEndData] = useState(null);
+  const { theme } = useTheme();
 
   // Get drawer ID from gameState - try drawerId first, then fall back to array lookup
   const currentDrawerId = gameState?.drawerId || (gameState?.players && gameState?.players[gameState?.currentDrawer]?.id);
@@ -120,9 +122,15 @@ function GameView({ socket, username, roomCode, gameState: initialGameState }) {
   };
 
   return (
-    <div className="min-h-screen bg-black text-white flex flex-col h-screen overflow-hidden">
+    <div 
+      className="min-h-screen flex flex-col h-screen overflow-hidden"
+      style={{ backgroundColor: theme.bg, color: theme.text }}
+    >
       {/* Top Bar */}
-      <div className="bg-neutral-900 border-b-2 border-white px-4 lg:px-6 py-2 lg:py-3 flex-shrink-0 z-10">
+      <div 
+        className="flex-shrink-0 z-10 px-4 lg:px-6 py-2 lg:py-3 border-b-2"
+        style={{ backgroundColor: theme.accent, borderColor: theme.text }}
+      >
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-4 lg:gap-8 text-sm lg:text-base">
             <div className="flex items-baseline gap-2">
@@ -151,7 +159,10 @@ function GameView({ socket, username, roomCode, gameState: initialGameState }) {
       {/* Main Game Area */}
       <div className="flex-1 flex overflow-hidden flex-col lg:flex-row min-h-0">
         {/* Left Sidebar - Players (Desktop only) */}
-        <div className="hidden lg:block w-64 border-r-2 border-white bg-black p-4 flex-shrink-0 overflow-y-auto">
+        <div 
+          className="hidden lg:block w-64 p-4 flex-shrink-0 overflow-y-auto border-r-2"
+          style={{ backgroundColor: theme.bg, borderColor: theme.text }}
+        >
           <PlayerList
             players={gameState?.players || []}
             currentDrawerId={currentDrawerId}
@@ -169,7 +180,10 @@ function GameView({ socket, username, roomCode, gameState: initialGameState }) {
         </div>
 
         {/* Right Sidebar - Chat (Desktop only) */}
-        <div className="hidden lg:flex w-64 border-l-2 border-white bg-black p-4 flex-col flex-shrink-0">
+        <div 
+          className="hidden lg:flex w-64 p-4 flex-col flex-shrink-0 border-l-2"
+          style={{ backgroundColor: theme.bg, borderColor: theme.text }}
+        >
           <Chat
             socket={socket}
             isDrawer={isDrawer}
@@ -181,7 +195,10 @@ function GameView({ socket, username, roomCode, gameState: initialGameState }) {
 
       {/* Mobile Chat Input - Always visible at bottom on mobile */}
       {!isDrawer && (
-        <div className="lg:hidden border-t-2 border-white bg-neutral-900 p-3 flex-shrink-0">
+        <div 
+          className="lg:hidden p-3 flex-shrink-0 border-t-2"
+          style={{ backgroundColor: theme.accent, borderColor: theme.text }}
+        >
           <form onSubmit={(e) => {
             e.preventDefault();
             const input = e.target.elements.mobileGuess;
@@ -193,13 +210,15 @@ function GameView({ socket, username, roomCode, gameState: initialGameState }) {
               name="mobileGuess"
               type="text"
               placeholder="Type your guess..."
-              className="flex-1 px-3 py-2 bg-black text-white rounded-lg border-2 border-white focus:outline-none focus:ring-2 focus:ring-white/50 placeholder-neutral-500 text-sm min-w-0"
+              className="flex-1 px-3 py-2 rounded-lg border-2 focus:outline-none focus:ring-2 focus:ring-white/50 placeholder-neutral-500 text-sm min-w-0"
+              style={{ backgroundColor: theme.bg, color: theme.text, borderColor: theme.text }}
               autoComplete="off"
               maxLength={50}
             />
             <button
               type="submit"
-              className="px-4 py-2 bg-white hover:bg-neutral-200 text-black font-bold rounded-lg transition-all text-xs uppercase tracking-wide flex-shrink-0"
+              className="px-4 py-2 font-bold rounded-lg transition-all text-xs uppercase tracking-wide flex-shrink-0"
+              style={{ backgroundColor: theme.text, color: theme.bg }}
             >
               Send
             </button>
@@ -208,14 +227,17 @@ function GameView({ socket, username, roomCode, gameState: initialGameState }) {
       )}
 
       {/* Mobile Word Display - Show current word or hint */}
-      <div className="lg:hidden border-t-2 border-white bg-neutral-900 px-4 py-2 flex items-center justify-center gap-4 text-xs flex-shrink-0">
+      <div 
+        className="lg:hidden px-4 py-2 flex items-center justify-center gap-4 text-xs flex-shrink-0 border-t-2"
+        style={{ backgroundColor: theme.accent, borderColor: theme.text }}
+      >
         {isDrawer && currentWord && (
-          <div className="px-3 py-1 bg-white text-black rounded font-bold">
+          <div className="px-3 py-1 rounded font-bold" style={{ backgroundColor: theme.text, color: theme.bg }}>
             Drawing: {currentWord}
           </div>
         )}
         {!isDrawer && wordLength > 0 && (
-          <div className="font-mono tracking-[0.3em] text-white text-sm">{Array(wordLength).fill('_').join(' ')}</div>
+          <div className="font-mono tracking-[0.3em] text-sm" style={{ color: theme.text }}>{Array(wordLength).fill('_').join(' ')}</div>
         )}
       </div>
 

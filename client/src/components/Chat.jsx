@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { playSound } from '../utils/sounds';
+import { useTheme } from '../context/ThemeContext';
 
 function Chat({ socket, isDrawer, currentWord, wordLength }) {
   const [messages, setMessages] = useState([]);
   const [guess, setGuess] = useState('');
   const messagesEndRef = useRef(null);
+  const { theme } = useTheme();
 
   useEffect(() => {
     if (!socket) return;
@@ -19,14 +21,43 @@ function Chat({ socket, isDrawer, currentWord, wordLength }) {
 
     const handleCorrectGuess = (data) => {
       playSound('correctGuess');
+      
+      // Build detailed message with bonuses
+      let bonusText = '';
+      if (data.bonuses) {
+        const bonusParts = [];
+        if (data.bonuses.firstGuess) bonusParts.push(`First! +${data.bonuses.firstGuess}`);
+        if (data.bonuses.speedBonus) bonusParts.push(`Speed! +${data.bonuses.speedBonus}`);
+        if (data.bonuses.streak) bonusParts.push(`Streak! +${data.bonuses.streak}`);
+        
+        if (bonusParts.length > 0) {
+          bonusText = ` [${bonusParts.join(', ')}]`;
+        }
+      }
+
       setMessages((prev) => [
         ...prev,
         {
           username: 'System',
-          message: `${data.username} guessed it! (+${data.points} points)`,
-          type: 'correct'
+          message: `${data.username} guessed it! +${data.points} points${bonusText}`,
+          type: 'correct',
+          drawerBonus: data.drawerPoints
         }
       ]);
+
+      // If there's a drawer bonus, show it separately
+      if (data.drawerPoints && data.drawer) {
+        setTimeout(() => {
+          setMessages((prev) => [
+            ...prev,
+            {
+              username: 'System',
+              message: `${data.drawer} earned +${data.drawerPoints} points for drawing!`,
+              type: 'drawer-bonus'
+            }
+          ]);
+        }, 500);
+      }
     };
 
     const handleWordSelected = (data) => {
@@ -65,19 +96,22 @@ function Chat({ socket, isDrawer, currentWord, wordLength }) {
   };
 
   return (
-    <div className="flex flex-col h-full bg-neutral-900 rounded-lg border-2 border-white">
-      <div className="p-4 border-b-2 border-white flex-shrink-0">
-        <h3 className="text-white font-bold mb-3 text-sm uppercase tracking-wide">Word Info</h3>
+    <div 
+      className="flex flex-col h-full rounded-lg border-2"
+      style={{ backgroundColor: theme.accent, borderColor: theme.text, color: theme.text }}
+    >
+      <div className="p-4 border-b-2 flex-shrink-0" style={{ borderColor: theme.text }}>
+        <h3 className="font-bold mb-3 text-sm uppercase tracking-wide" style={{ color: theme.text }}>Word Info</h3>
         {isDrawer ? (
-          <div className="bg-white text-black px-4 py-3 rounded-lg text-sm font-bold" role="status">
+          <div className="px-4 py-3 rounded-lg text-sm font-bold" style={{ backgroundColor: theme.text, color: theme.bg }} role="status">
             Drawing: {currentWord}
           </div>
         ) : wordLength > 0 ? (
-          <div className="bg-neutral-800 text-white px-4 py-3 rounded-lg text-lg font-mono tracking-[0.5em]" role="status" aria-label={`Word has ${wordLength} letters`}>
+          <div className="px-4 py-3 rounded-lg text-lg font-mono tracking-[0.5em]" style={{ backgroundColor: theme.bg, color: theme.text }} role="status" aria-label={`Word has ${wordLength} letters`}>
             {Array(wordLength).fill('_').join(' ')}
           </div>
         ) : (
-          <div className="bg-neutral-800 text-neutral-400 px-4 py-3 rounded-lg text-sm">Waiting for word selection...</div>
+          <div className="px-4 py-3 rounded-lg text-sm" style={{ backgroundColor: theme.bg, color: theme.text, opacity: 0.6 }}>Waiting for word selection...</div>
         )}
       </div>
 
@@ -91,12 +125,17 @@ function Chat({ socket, isDrawer, currentWord, wordLength }) {
           <div
             key={idx}
             className={`p-3 rounded text-sm transition-all duration-200 ${
-              msg.type === 'correct'
-                ? 'bg-white text-black font-medium border border-white'
+              msg.type === 'correct' || msg.type === 'drawer-bonus'
+                ? 'font-medium'
                 : msg.type === 'system'
-                ? 'bg-neutral-800 text-neutral-400 text-xs italic border border-neutral-700'
-                : 'bg-neutral-800 text-white border border-neutral-700'
+                ? 'text-xs italic'
+                : ''
             }`}
+            style={{
+              backgroundColor: msg.type === 'correct' || msg.type === 'drawer-bonus' ? theme.text : theme.bg,
+              color: msg.type === 'correct' || msg.type === 'drawer-bonus' ? theme.bg : theme.text,
+              border: `1px solid ${theme.text}`
+            }}
             role="article"
           >
             <span className="font-bold">{msg.username}</span>
@@ -107,7 +146,7 @@ function Chat({ socket, isDrawer, currentWord, wordLength }) {
       </div>
 
       {!isDrawer && (
-        <form onSubmit={handleSubmit} className="p-3 lg:p-4 border-t-2 border-white flex-shrink-0">
+        <form onSubmit={handleSubmit} className="p-3 lg:p-4 border-t-2 flex-shrink-0" style={{ borderColor: theme.text }}>
           <div className="flex gap-2">
             <label htmlFor="guess-input" className="sr-only">Type your guess</label>
             <input
@@ -116,7 +155,8 @@ function Chat({ socket, isDrawer, currentWord, wordLength }) {
               value={guess}
               onChange={(e) => setGuess(e.target.value)}
               placeholder="Type guess..."
-              className="flex-1 px-3 py-2 lg:py-3 bg-black text-white rounded-lg border-2 border-white focus:outline-none focus:ring-4 focus:ring-white/50 placeholder-neutral-500 transition-all text-sm min-w-0"
+              className="flex-1 px-3 py-2 lg:py-3 rounded-lg border-2 focus:outline-none focus:ring-4 focus:ring-white/50 placeholder-neutral-500 transition-all text-sm min-w-0"
+              style={{ backgroundColor: theme.bg, color: theme.text, borderColor: theme.text }}
               autoComplete="off"
               aria-label="Enter your guess"
               maxLength={50}
@@ -124,7 +164,8 @@ function Chat({ socket, isDrawer, currentWord, wordLength }) {
             <button
               type="submit"
               disabled={!guess.trim()}
-              className="px-3 lg:px-5 py-2 lg:py-3 bg-white hover:bg-neutral-200 text-black font-bold rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-4 focus:ring-white/50 uppercase text-xs tracking-wide flex-shrink-0"
+              className="px-3 lg:px-5 py-2 lg:py-3 font-bold rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-4 focus:ring-white/50 uppercase text-xs tracking-wide flex-shrink-0"
+              style={{ backgroundColor: theme.text, color: theme.bg }}
               aria-label="Send guess"
             >
               Send

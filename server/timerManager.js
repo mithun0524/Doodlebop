@@ -1,28 +1,39 @@
+const scoringEngine = require('./scoringEngine');
 const timers = new Map();
 
 function startRoundTimer(roomCode, duration, roomManager, io) {
-  // Clear existing timer if any
-  clearTimer(roomCode);
+  try {
+    // Clear existing timer if any
+    clearTimer(roomCode);
 
-  let timeLeft = duration;
-  
-  const timerMgr = module.exports;
-  const interval = setInterval(() => {
-    timeLeft--;
-    
-    io.to(roomCode).emit('timer-update', {
-      timeLeft,
-      roomCode
-    });
-
-    if (timeLeft <= 0) {
-      clearInterval(interval);
-      timers.delete(roomCode);
-      endRound(roomCode, roomManager, io, timerMgr);
+    // Validate duration
+    if (typeof duration !== 'number' || duration <= 0) {
+      console.error('Invalid timer duration:', duration);
+      duration = 90; // Default to 90 seconds
     }
-  }, 1000);
 
-  timers.set(roomCode, interval);
+    let timeLeft = duration;
+    
+    const timerMgr = module.exports;
+    const interval = setInterval(() => {
+      timeLeft--;
+      
+      io.to(roomCode).emit('timer-update', {
+        timeLeft,
+        roomCode
+      });
+
+      if (timeLeft <= 0) {
+        clearInterval(interval);
+        timers.delete(roomCode);
+        endRound(roomCode, roomManager, io, timerMgr);
+      }
+    }, 1000);
+
+    timers.set(roomCode, interval);
+  } catch (error) {
+    console.error('Error starting round timer:', error);
+  }
 }
 
 function endRound(roomCode, roomManager, io, timerMgr) {
@@ -35,18 +46,48 @@ function endRound(roomCode, roomManager, io, timerMgr) {
     }
 
     const { currentWord, players } = room.gameState;
+    
+    // Validate players array
+    if (!Array.isArray(players) || players.length === 0) {
+      console.error('Invalid players array');
+      return;
+    }
+
     const drawer = players[room.gameState.currentDrawer];
+    if (!drawer) {
+      console.error('Drawer not found at index:', room.gameState.currentDrawer);
+      return;
+    }
+
+    // Process round-end scoring (drawer completion bonus)
+    const roundEndResult = scoringEngine.processRoundEnd(room);
+    
+    console.log('endRound: Round end scoring result:', {
+      drawerBonus: roundEndResult.drawerBonus,
+      guessersCount: roundEndResult.guessersCount,
+      totalPlayers: roundEndResult.totalPlayers
+    });
+
+    // Validate all player scores
+    scoringEngine.validatePlayerScores(players);
 
     console.log('endRound: Emitting round-end for round', room.gameState.currentRound);
-    // Emit round end
+    // Emit round end with detailed scoring info
     io.to(roomCode).emit('round-end', {
       word: currentWord,
       scores: players.map(p => ({
         username: p.username,
-        score: p.score
+        score: p.score,
+        hasGuessed: p.hasGuessed || false,
+        streak: p.streak || 0
       })),
       drawer: drawer.username,
-      round: room.gameState.currentRound
+      round: room.gameState.currentRound,
+      roundEndBonus: {
+        drawerBonus: roundEndResult.drawerBonus,
+        guessersCount: roundEndResult.guessersCount,
+        totalPlayers: roundEndResult.totalPlayers
+      }
     });
 
     // Wait 5 seconds before next round
@@ -65,10 +106,14 @@ function endRound(roomCode, roomManager, io, timerMgr) {
 }
 
 function clearTimer(roomCode) {
-  const timer = timers.get(roomCode);
-  if (timer) {
-    clearInterval(timer);
-    timers.delete(roomCode);
+  try {
+    const timer = timers.get(roomCode);
+    if (timer) {
+      clearInterval(timer);
+      timers.delete(roomCode);
+    }
+  } catch (error) {
+    console.error('Error clearing timer:', error);
   }
 }
 

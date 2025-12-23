@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTheme } from '../context/ThemeContext';
 
 function Home({ socket, username, setUsername, setRoomCode }) {
   const [showJoinInput, setShowJoinInput] = useState(false);
@@ -8,6 +9,7 @@ function Home({ socket, username, setUsername, setRoomCode }) {
   const [isCreating, setIsCreating] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
   const navigate = useNavigate();
+  const { theme } = useTheme();
 
   useEffect(() => {
     if (!socket) return;
@@ -79,13 +81,24 @@ function Home({ socket, username, setUsername, setRoomCode }) {
   };
 
   return (
-    <div className="min-h-screen bg-black flex items-center justify-center p-4">
+    <div 
+      className="min-h-screen flex items-center justify-center p-4"
+      style={{ backgroundColor: theme.bg, color: theme.text }}
+    >
       <div className="w-full max-w-md">
         <div className="text-center mb-12">
-          <h1 className="text-7xl font-black text-white mb-3 tracking-tight">
+          <h1 
+            className="text-7xl font-black mb-3 tracking-tight"
+            style={{ color: theme.text }}
+          >
             Doodlebop
           </h1>
-          <p className="text-neutral-400 text-sm uppercase tracking-widest">Draw · Guess · Win</p>
+          <p 
+            className="text-sm uppercase tracking-widest"
+            style={{ color: theme.text, opacity: 0.6 }}
+          >
+            Draw · Guess · Win
+          </p>
         </div>
 
         <div className="space-y-3">
@@ -98,7 +111,12 @@ function Home({ socket, username, setUsername, setRoomCode }) {
               onChange={(e) => setUsername(e.target.value)}
               onKeyPress={(e) => handleKeyPress(e, handleCreateRoom)}
               placeholder="Your name"
-              className="w-full px-5 py-4 bg-neutral-900 text-white border-2 border-white rounded-lg focus:outline-none focus:ring-4 focus:ring-white/50 transition-all placeholder-neutral-500"
+              style={{
+                backgroundColor: theme.accent,
+                color: theme.text,
+                borderColor: theme.text
+              }}
+              className="w-full px-5 py-4 border-2 rounded-lg focus:outline-none focus:ring-4 focus:ring-white/50 transition-all placeholder-neutral-500"
               maxLength={20}
               autoComplete="username"
               aria-label="Enter your username"
@@ -109,7 +127,8 @@ function Home({ socket, username, setUsername, setRoomCode }) {
 
           {error && (
             <div 
-              className="bg-white text-black px-4 py-3 rounded-lg text-sm font-medium animate-shake"
+              style={{ backgroundColor: theme.text, color: theme.bg }}
+              className="px-4 py-3 rounded-lg text-sm font-medium animate-shake"
               role="alert"
               aria-live="polite"
             >
@@ -120,27 +139,29 @@ function Home({ socket, username, setUsername, setRoomCode }) {
           <button
             onClick={handleCreateRoom}
             disabled={isCreating || !username.trim()}
-            className="w-full bg-white hover:bg-neutral-200 text-black font-medium py-4 rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-4 focus:ring-white/50"
+            style={{ backgroundColor: theme.text, color: theme.bg }}
+            className="w-full hover:opacity-90 font-medium py-4 rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-4 focus:ring-white/50"
             aria-label="Create a new room"
           >
             {isCreating ? (
               <span className="flex items-center justify-center gap-2">
-                <span className="inline-block w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin"></span>
+                <span className="inline-block w-4 h-4 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: theme.bg }}></span>
                 Creating...
               </span>
             ) : 'Create Room'}
           </button>
 
           <div className="flex items-center gap-3" role="separator">
-            <div className="flex-1 border-t border-neutral-700"></div>
-            <span className="text-neutral-500 text-xs uppercase tracking-wide">or</span>
-            <div className="flex-1 border-t border-neutral-700"></div>
+            <div className="flex-1 border-t" style={{ borderColor: theme.text, opacity: 0.3 }}></div>
+            <span className="text-xs uppercase tracking-wide" style={{ color: theme.text, opacity: 0.5 }}>or</span>
+            <div className="flex-1 border-t" style={{ borderColor: theme.text, opacity: 0.3 }}></div>
           </div>
 
           {!showJoinInput ? (
             <button
               onClick={() => setShowJoinInput(true)}
-              className="w-full bg-neutral-900 hover:bg-neutral-800 text-white font-medium py-4 rounded-lg border-2 border-white transition-all duration-200 focus:outline-none focus:ring-4 focus:ring-white/50"
+              style={{ backgroundColor: theme.accent, color: theme.text, borderColor: theme.text }}
+              className="w-full font-medium py-4 rounded-lg border-2 transition-all duration-200 focus:outline-none focus:ring-4 focus:ring-white/50"
               aria-label="Show join room form"
             >
               Join Room
@@ -156,7 +177,8 @@ function Home({ socket, username, setUsername, setRoomCode }) {
                   onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
                   onKeyPress={(e) => handleKeyPress(e, handleJoinRoom)}
                   placeholder="CODE"
-                  className="w-full px-4 py-4 bg-neutral-900 text-white text-center text-2xl font-bold tracking-[0.5em] rounded-lg border-2 border-white focus:outline-none focus:ring-4 focus:ring-white/50 uppercase placeholder-neutral-600 transition-all"
+                  style={{ backgroundColor: theme.accent, color: theme.text, borderColor: theme.text }}
+                  className="w-full px-4 py-4 text-center text-2xl font-bold tracking-[0.5em] rounded-lg border-2 focus:outline-none focus:ring-4 focus:ring-white/50 uppercase placeholder-neutral-600 transition-all"
                   maxLength={6}
                   autoComplete="off"
                   autoFocus
@@ -169,12 +191,13 @@ function Home({ socket, username, setUsername, setRoomCode }) {
                 <button
                   onClick={handleJoinRoom}
                   disabled={isJoining || joinCode.length !== 6}
-                  className="flex-1 bg-white hover:bg-neutral-200 text-black font-medium py-3 rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-4 focus:ring-white/50"
+                  style={{ backgroundColor: theme.text, color: theme.bg }}
+                  className="flex-1 font-medium py-3 rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-4 focus:ring-white/50"
                   aria-label="Join the room"
                 >
                   {isJoining ? (
                     <span className="flex items-center justify-center gap-2">
-                      <span className="inline-block w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin"></span>
+                      <span className="inline-block w-4 h-4 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: theme.bg }}></span>
                       Joining...
                     </span>
                   ) : 'Join'}
@@ -186,7 +209,8 @@ function Home({ socket, username, setUsername, setRoomCode }) {
                     setError('');
                   }}
                   disabled={isJoining}
-                  className="px-6 bg-neutral-900 hover:bg-neutral-800 text-white font-medium py-3 rounded-lg border-2 border-white transition-all duration-200 disabled:opacity-50 focus:outline-none focus:ring-4 focus:ring-white/50"
+                  style={{ backgroundColor: theme.accent, color: theme.text, borderColor: theme.text }}
+                  className="px-6 font-medium py-3 rounded-lg border-2 transition-all duration-200 disabled:opacity-50 focus:outline-none focus:ring-4 focus:ring-white/50"
                   aria-label="Cancel and go back"
                 >
                   Back
